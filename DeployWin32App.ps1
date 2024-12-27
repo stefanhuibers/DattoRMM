@@ -18,22 +18,15 @@ try {
 
 # Variable Section
 $displayName = "Datto RMM"
-$description = "Datto RMM"
+$description = "Datto RMM is een cloudgebaseerde oplossing die IT-beheerders helpt om op afstand netwerken en apparaten te monitoren en beheren. Xantion ICT maakt gebruik van Datto RMM om hun klanten proactief en efficiënt te ondersteunen."
 $publisher = "Datto Inc."
 $installBehavior = "system"
-$installCommandLine = "powershell -ExecutionPolicy Bypass -File install.ps1 $siteId"
-$uninstallCommandLine = "powershell -ExecutionPolicy Bypass -File uninstall.ps1"
-$companyPortalFeaturedApp = $true
-$intuneWinFile = "C:\Users\s.huibers\Downloads\OneDrive_2024-12-25\Datto RMM\Output\install.intunewin"
-$detectionScriptContent = @"
-if (Get-Service CagService -ErrorAction SilentlyContinue) {
-    Write-Output "Datto RMM Agent already installed on this device"
-    exit 0
-} else {
-    Write-Output "Datto RMM Agent not installed on this device"
-    exit 1
-}
-"@
+$installCommandLine = "powershell -ExecutionPolicy Bypass -File InstallDattoRMM.ps1 -SiteId $siteId"
+$uninstallCommandLine = "powershell -ExecutionPolicy Bypass -File UninstallDattoRMM.ps1"
+$companyPortalFeaturedApp = $false
+$urlWin32AppLogo = "https://github.com/stefanhuibers/DattoRMM/blob/main/LogoDattoRMM.png"
+$urlWin32AppIntuneWinFile = "https://github.com/stefanhuibers/DattoRMM/blob/main/InstallDattoRMM.intunewin"
+$urlWin32AppDetectionScript = "https://github.com/stefanhuibers/DattoRMM/blob/main/DetectionScriptDattoRMM.ps1"
 $graphModules = @("Microsoft.Graph.Authentication", "Microsoft.Graph.Applications", "Microsoft.Graph.Identity.DirectoryManagement")
 $graphScopes = @("Application.ReadWrite.All", "Directory.ReadWrite.All", "AppRoleAssignment.ReadWrite.All", "RoleAssignmentSchedule.ReadWrite.Directory", "Domain.Read.All", "Domain.ReadWrite.All", "Directory.Read.All", "Policy.ReadWrite.ConditionalAccess", "DeviceManagementApps.ReadWrite.All", "DeviceManagementConfiguration.ReadWrite.All", "DeviceManagementManagedDevices.ReadWrite.All")
 $entraAppName = "IntuneWin32App"
@@ -169,7 +162,6 @@ catch {
 # Create the application
 $entraApp = New-EntraApplication -AppName $entraAppName
 
-#
 # Connect to Intune Graph API
 Connect-MSIntuneGraph -TenantID $entraApp.TenantId -ClientID $entraApp.AppId -ClientSecret $entraApp.Secret -ErrorAction Stop
 
@@ -177,27 +169,80 @@ Connect-MSIntuneGraph -TenantID $entraApp.TenantId -ClientID $entraApp.AppId -Cl
 $RequirementRule = New-IntuneWin32AppRequirementRule -Architecture "All" -MinimumSupportedWindowsRelease "W10_1607"
 
 # Create PowerShell script detection rule
-$scriptFile = "$env:temp\DetectionScriptContent.ps1"
-$detectionScriptContent | Out-File -FilePath $scriptFile -Force -Encoding ascii
+$scriptFile = "$env:temp\DetectionScriptDattoRMM.ps1"
+try {
+    (New-Object System.Net.WebClient).DownloadFile($urlWin32AppDetectionScript, $scriptFile)
+    if (-not (Test-Path $scriptFile)) {
+        Write-Host "Failed to download the detection script. Please make sure the URL is correct and try again." -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "Failed to download the detection script. Please make sure the URL is correct and try again." -ForegroundColor Red
+    exit 1
+}
 $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $scriptFile -EnforceSignatureCheck $false -RunAs32Bit $false
-Get-ChildItem -Path $scriptFile | Remove-Item -Force
+# Clean up the detection script file
+try {
+    Get-ChildItem -Path $scriptFile | Remove-Item -Force
+} catch {
+    Write-Host "Failed to remove the detection script file." -ForegroundColor Yellow
+}
 
+# Download the Win32 IntuneWin file
+$intuneWinFile = "$env:temp\InstallDattoRMM.intunewin"
+try {
+    (New-Object System.Net.WebClient).DownloadFile($urlWin32AppIntuneWinFile, $intuneWinFile)
+    if (-not (Test-Path $intuneWinFile)) {
+        Write-Host "Failed to download the IntuneWin file. Please make sure the URL is correct and try again." -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "Failed to download the IntuneWin file. Please make sure the URL is correct and try again." -ForegroundColor Red
+    exit 1
+}
+# Download the Win32 app logo
+$logoFile = "$env:temp\LogoDattoRMM.png"
+try {
+    (New-Object System.Net.WebClient).DownloadFile($urlWin32AppLogo, $logoFile)
+    if (-not (Test-Path $logoFile)) {
+        Write-Host "Failed to download the logo file. Please make sure the URL is correct and try again." -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "Failed to download the logo file. Please make sure the URL is correct and try again." -ForegroundColor Red
+    exit 1
+}
+# Create the app icon
+$appIcon = New-IntuneWin32AppIcon -FilePath $logoFile
+# Clean up the logo file
+try {
+    Get-ChildItem -Path $logoFile | Remove-Item -Force
+} catch {
+    Write-Host "Failed to remove the logo file." -ForegroundColor Yellow
+}
 # Add new EXE Win32 app
 $params = @{
     DisplayName = $displayName;
     Description = $description;
     Publisher = $publisher;
-    InstallExperience = "system";
+    $Icon = $appIcon;
+    InstallExperience = $installBehavior; 
     RestartBehavior = "suppress";
     DetectionRule = $detectionRule;
     RequirementRule = $RequirementRule;
     InstallCommandLine = $installCommandLine;
     UninstallCommandLine = $uninstallCommandLine;
+    CompanyPortalFeaturedApp = $companyPortalFeaturedApp;
     Verbose = $true;
     FilePath = $intuneWinFile
 }
 Add-IntuneWin32App @params
-
+# Clean up the IntuneWin file
+try {
+    Get-ChildItem -Path $intuneWinFile | Remove-Item -Force
+} catch {
+    Write-Host "Failed to remove the IntuneWin file." -ForegroundColor Yellow
+}
 
 # Remove the application
 try {
